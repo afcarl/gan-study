@@ -14,7 +14,7 @@ class Maxout1d(nn.Module):
     and https://arxiv.org/abs/1302.4389.
     '''
 
-    def __init__(self, d_in, d_out, pool_sz):
+    def __init__(self, d_in, d_out, pool_sz=5):
         '''
         Initializes maxout layer.
 
@@ -23,10 +23,10 @@ class Maxout1d(nn.Module):
         @param pool_sz pooling size.
         '''
 
-        super(Maxout, self).__init__()
+        super(Maxout1d, self).__init__()
         self.d_in, self.d_out, self.pool_sz = d_in, d_out, pool_sz
         self.lin = nn.Sequential(
-            nn.Dropout(),
+            nn.Dropout(0.3),
             nn.Linear(d_in, d_out * pool_sz)
         )
 

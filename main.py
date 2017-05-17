@@ -7,6 +7,7 @@ Trains a GAN model on the MNIST database.
 import os # path manipulation and OS resources
 import time # Time measurement
 import yaml # Open configuration file
+import math # math operations
 import shutil # To copy/move files
 import argparse # command line argumments parser
 import matplotlib.pyplot as plt # plots
@@ -25,7 +26,7 @@ from torchvision.datasets import MNIST, CIFAR10 # Datasets
 
 import models as models # Custom GAN models
 from utils.meter import AverageMeter # measurement
-from utils.data import ConcDataset # Data set concatenation
+from utils.data import DataCSV, ConcDataset # Data set concatenation
 
 def load_data(dataset, path):
     '''
@@ -60,6 +61,18 @@ def load_data(dataset, path):
 
         # Concatenating training and test sets to wrapper
         dwrpr = ConcDataset([trset, tsset])
+
+    elif dataset = 'CELEBA':
+
+        # Breaking csv file path from base path
+        root, csv = os.path.basename(path)
+
+        # Setting images path
+        imgs_path = os.path.join(root, 'imgs')
+
+        # Loading dataseet
+        scale = tf.Scale(tuple(conf['scales']))
+        dwrpr = DataCSV(imgs_path, path, tf.Compose([scale, totns, norms]))
 
     # Return dataset wrapper
     return dwrpr
@@ -111,7 +124,7 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
 
     # Compute batch evaluation
     end_time = time.time()
-    for i, (imgs, _) in enumerate(dload):
+    for i, (imgs, trgs) in enumerate(dload):
 
         # Loading time
         tdload.update(time.time() - end_time)
@@ -169,7 +182,8 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
         )
 
         # Print images
-        if i % 100 == 0:
+        if i == 0:
+            nrows = int(math.sqrt(conf['btsize']))
             vutils.save_image(imgs, rslt_path+'real.png',\
             normalize=True, nrow=16)
             out = gmodel(zt)
@@ -185,7 +199,7 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
 if __name__ == '__main__':
 
     # Setting datasets
-    dset_names = ['MNIST', 'CIFAR10']
+    dset_names = ['MNIST', 'CIFAR10', 'CELEBA']
 
     # Arguments parser
     parser = argparse.ArgumentParser(description='GAN study parser')

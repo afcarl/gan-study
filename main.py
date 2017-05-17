@@ -27,6 +27,42 @@ import models as models # Custom GAN models
 from utils.meter import AverageMeter # measurement
 from utils.data import ConcDataset # Data set concatenation
 
+def load_data(dataset, path):
+    '''
+    Loads dataset images.
+
+    @param dataset dataset type
+    @param path dataset/images path.
+
+    @return dataset wrapper for dataloader.
+    '''
+
+    # Setting preprocessing methods
+    scl_factor = [0.5, 0.5, 0.5]
+    norms = tf.Normalize(mean=scl_factor, std=scl_factor) # Normalize
+    totns = tf.ToTensor() # Converts to tensor
+
+    # Testing dataset
+    if dataset == 'MNIST':
+
+        # Loading MNIST dataset
+        trset = MNIST(path, True, tf.Compose([totns, norms]))
+        tsset = MNIST(path, False, tf.Compose([totns, norms]))
+
+        # Concatenating training and test sets to wrapper
+        dwrpr = ConcDataset([trset, tsset])
+
+    elif dataset == 'CIFAR10':
+
+        # Loading CIFAR10 dataset
+        trset = CIFAR10(path, True, tf.Compose([totns, norms]))
+        tsset = CIFAR10(path, False, tf.Compose([totns, norms]))
+
+        # Concatenating training and test sets to wrapper
+        dwrpr = ConcDataset([trset, tsset])
+
+    # Return dataset wrapper
+    return dwrpr
 
 def checkpoint(state, is_best, curpath, bstpath):
     '''
@@ -189,16 +225,12 @@ if __name__ == '__main__':
     conf['dmloss'], conf['gmloss'], conf['smloss'] = [], [], []
     min_lss = float('inf')
 
-    # Load MNIST dataset
-    norms = tf.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]) # Normalize
-    totns = tf.ToTensor() # Converts to tensor
-    mnist_trset = MNIST(data_path, True, tf.Compose([totns, norms]))
-    mnist_tsset = MNIST(data_path, False, tf.Compose([totns, norms]))
-    mnist_set = ConcDataset([mnist_trset, mnist_tsset])
+    # Load dataset
+    dwrpr = load_data(args.dataset, data_path)
 
     # Setting loader
     btsize, nworks = conf['btsize'], conf['nworks']
-    dload = data.DataLoader(mnist_set, btsize, True, None, nworks)
+    dload = data.DataLoader(dwrpr, btsize, True, None, nworks)
 
     # Setting models
     imsz, dlyrs, glyrs = tuple(conf['imsize']), conf['dlayer'], conf['glayer']

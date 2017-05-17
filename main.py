@@ -8,20 +8,25 @@ import os # path manipulation and OS resources
 import time # Time measurement
 import yaml # Open configuration file
 import shutil # To copy/move files
-import models as models # Custom GAN models
+import argparse # command line argumments parser
 import matplotlib.pyplot as plt # plots
+
 import torch # Torch variables handler
 import torch.nn as nn # Networks support
 import torch.nn.functional as F # functional
 import torch.nn.parallel # parallel support
 import torch.backends.cudnn as cudnn # Cuda support
 import torch.optim as optim # Optimizer
-import torchvision.transforms as tf # Data transforms
 import torch.utils.data as data # Data loaders
+
+import torchvision.transforms as tf # Data transforms
 import torchvision.utils as vutils # Image utils
+from torchvision.datasets import MNIST, CIFAR10 # Datasets
+
+import models as models # Custom GAN models
 from utils.meter import AverageMeter # measurement
 from utils.data import ConcDataset # Data set concatenation
-from torchvision.datasets import MNIST # Datasets
+
 
 def checkpoint(state, is_best, curpath, bstpath):
     '''
@@ -143,10 +148,31 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
 
 if __name__ == '__main__':
 
+    # Setting datasets
+    dset_names = ['MNIST', 'CIFAR10']
+
+    # Arguments parser
+    parser = argparse.ArgumentParser(description='GAN study parser')
+
+    # Dataset
+    parser.add_argument('--dataset', metavar='DSET', default='MNIST',
+        choices=dset_names,
+        help='Valid datasets: ' + ' | '.join(dset_names) + ' default: MNIST')
+    parser.add_argument('--data-path', metavar='DIR', help='path to dataset')
+
+    # Config file
+    parser.add_argument('--conf-file', metavar='CONF', help='config file')
+
+    # Output path
+    parser.add_argument('--out-path', metavar='OUT', help='output path')
+
+    # Parsing arguments
+    args = parser.parse_args()
+
     # Config path
-    data_path = '../data/mnist/'
-    conf_path = '../conf/mnist_gf2014.yaml'
-    rslt_path = '../rslt/mnist/'
+    data_path = args.data_path
+    conf_path = args.conf_file
+    rslt_path = args.out_path
 
     # Open config file
     conf = None
@@ -156,7 +182,7 @@ if __name__ == '__main__':
     # Setting outputs
     cur_mdl_pth = rslt_path+'cgan_curr.pth.tar'
     bst_mdl_pth = rslt_path+'cgan_best.pth.tar'
-    imgs_path = rslt_path+conf['dmodel']+'_'+conf['gmodel']+'.pdf'
+    imgs_path = rslt_path+'performance.pdf'
 
     # Setting initial losses
     conf['cepoch'] = 0

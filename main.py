@@ -62,7 +62,7 @@ def load_data(dataset, path):
         # Concatenating training and test sets to wrapper
         dwrpr = ConcDataset([trset, tsset])
 
-    elif dataset = 'CELEBA':
+    elif dataset == 'CELEBA':
 
         # Breaking csv file path from base path
         root, csv = os.path.basename(path)

@@ -8,6 +8,8 @@ import os # OS resources
 import numpy as np # numpy library
 import pandas as pd # Pandas library (csv reader, etc...)
 
+from sklearn.preprocessing import LabelBinarizer # one-hot encoder
+
 import torch # Torch operations
 from torch.utils.data import Dataset # Dataset class
 
@@ -73,6 +75,37 @@ def default_loader(path):
     @return Image.
     '''
     return Image.open(path).convert('RGB')
+
+class ToOneHot(object):
+	'''
+	One-hot encoder transform.
+	'''
+
+	def __init__(self, classes):
+		'''
+		Inits a ToOneHot instance.
+		@param classes Class vector.
+		'''
+
+		# Set encoder
+		self.encoder = LabelBinarizer()
+		self.encoder = self.encoder.fit(classes)
+
+	def __call__(self, tensor):
+		'''
+		Input call.
+		@param input torch tensor.
+		@return output tensor.
+		'''
+
+		# Convert tensor/int to numpy and computing labels
+		if isinstance(tensor, ( int, long )):
+			tensor = np.array([tensor])
+		elif isinstance(tensor, torch.Tensor):
+			tensor = tensor.numpy()
+		labels = torch.from_numpy(self.encoder.transform(tensor)).float()
+		labels = labels.squeeze()
+		return labels
 
 class DataCSV(Dataset):
     '''

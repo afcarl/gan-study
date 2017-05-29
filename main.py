@@ -10,7 +10,9 @@ import yaml # Open configuration file
 import math # math operations
 import shutil # To copy/move files
 import argparse # command line argumments parser
+import numpy as np # algebric operations
 import matplotlib.pyplot as plt # plots
+from scipy.linalg import hadamard # Hadamard matrix
 
 import torch # Torch variables handler
 import torch.nn as nn # Networks support
@@ -26,7 +28,7 @@ from torchvision.datasets import MNIST, CIFAR10 # Datasets
 
 import models as models # Custom GAN models
 from utils.meter import AverageMeter # measurement
-from utils.data import DataCSV, ConcDataset # Data set concatenation
+from utils.data import DataCSV, ConcDataset, ToOneHot # Dataset auxiliary
 
 def load_data(dataset, path):
     '''
@@ -46,18 +48,24 @@ def load_data(dataset, path):
     # Testing dataset
     if dataset == 'MNIST':
 
+        # Setting labels tranform
+        onehot = ToOneHot(range(11))
+
         # Loading MNIST dataset
-        trset = MNIST(path, True, tf.Compose([totns, norms]))
-        tsset = MNIST(path, False, tf.Compose([totns, norms]))
+        trset = MNIST(path, True, tf.Compose([totns, norms]), onehot)
+        tsset = MNIST(path, False, tf.Compose([totns, norms]), onehot)
 
         # Concatenating training and test sets to wrapper
         dwrpr = ConcDataset([trset, tsset])
 
     elif dataset == 'CIFAR10':
 
+        # Setting labels tranform
+        onehot = ToOneHot(range(11))
+
         # Loading CIFAR10 dataset
-        trset = CIFAR10(path, True, tf.Compose([totns, norms]))
-        tsset = CIFAR10(path, False, tf.Compose([totns, norms]))
+        trset = CIFAR10(path, True, tf.Compose([totns, norms]), onehot)
+        tsset = CIFAR10(path, False, tf.Compose([totns, norms]), onehot)
 
         # Concatenating training and test sets to wrapper
         dwrpr = ConcDataset([trset, tsset])
@@ -65,7 +73,7 @@ def load_data(dataset, path):
     elif dataset == 'CELEBA':
 
         # Breaking csv file path from base path
-        root, csv = os.path.basename(path)
+        root, csv = os.path.split(path)
 
         # Setting images path
         imgs_path = os.path.join(root, 'imgs')
@@ -93,18 +101,45 @@ def checkpoint(state, is_best, curpath, bstpath):
         shutil.copy(curpath, bstpath)
 
 
-def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
+def compute_embedded(btsize, zdim, trgs, is_cond=False):
+    '''
+    Computes the embedded vector for the generator.
+
+    @param btsize batch size.
+    @param zdim embedded vector dimension.
+    @param trgs target inputs for conditional GAN.
+    @param is_cond conditional flag.
+    '''
+
+    # Computing random noise
+    zvar = torch.randn(btsize, zdim)
+
+    # Testing for conditional info
+    if is_cond:
+
+        # Computing Hadamard matrix
+        tdim = trgs.size(1)
+        had_mat = hadamard(zdim)[:tdim, :]/128.0
+        had_mat = torch.from_numpy(had_mat).float()
+
+        # Converting targets to embedded dimension
+        zvar = zvar + torch.mm(trgs, had_mat)
+
+    # Return variables
+    return torch.autograd.Variable(zvar.cuda())
+
+def train(dload, dmdl, gmdl, dopt, gopt, zt, path, cond=False):
     '''
     Trains the models.
 
     @param dload Data loader.
-    @param dmodel Discriminator.
-    @parma gmodel Generator.
+    @param dmdl Discriminator.
+    @parma gmdl Generator.
     @param dopt Discriminator optimizer.
     @param gopt Generator optimizer.
-    @param conf configuration data.
     @param zt test figure noise
-    @param rslt_path Resulting images path.
+    @param path Resulting images path.
+    @param cond Conditional flag
 
     @return discriminator and generator losses.
     '''
@@ -116,11 +151,11 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
     avgglss = AverageMeter() # Average generator loss
 
     # Switch models to training mode
-    dmodel.train()
-    gmodel.train()
+    dmdl.train()
+    gmdl.train()
 
-    # Configuration info
-    zindim = conf['zindim']
+    # Embedded vector dimension
+    zindim = zt.size(1)
 
     # Compute batch evaluation
     end_time = time.time()
@@ -129,23 +164,27 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
         # Loading time
         tdload.update(time.time() - end_time)
 
-        # Setting labels
+        # Finding batch size
         btsize = imgs.size(0)
-        real_label = torch.autograd.Variable(torch.ones((btsize,1)).cuda())
-        fake_label = torch.autograd.Variable(torch.zeros((btsize,1)).cuda())
 
-        # Set variables
-        zdim = [btsize, zindim]
-        imgs_var = torch.autograd.Variable(imgs.cuda())
-        zvec_var = torch.randn(zdim)
-        zvec_var = torch.autograd.Variable(zvec_var.cuda())
+        # Setting true labels and images
+        rlbl = torch.autograd.Variable(trgs.cuda())
+        ivar = torch.autograd.Variable(imgs.cuda())
+
+        # Setting fake labels
+        flbl = trgs.clone()
+        flbl[:, -1] = 1.0
+        flbl = torch.autograd.Variable(flbl.cuda())
+
+        # Set embedded vector
+        zvar = compute_embedded(btsize, zindim, trgs[:, :-1], cond)
 
         # Computing generator images
-        fake = gmodel(zvec_var)
+        fake = gmdl(zvar)
 
         # Computing discriminator error
-        dlss = F.binary_cross_entropy(dmodel(imgs_var), real_label)
-        dlss += F.binary_cross_entropy(dmodel(fake.detach()), fake_label)
+        dlss = F.binary_cross_entropy(dmdl(ivar), rlbl)
+        dlss += F.binary_cross_entropy(dmdl(fake.detach()), flbl)
 
         # Update the discriminator
         dopt.zero_grad()
@@ -153,12 +192,11 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
         dopt.step()
 
         # Generate new images
-        zvec_var = torch.randn(zdim)
-        zvec_var = torch.autograd.Variable(zvec_var.cuda())
-        fake = gmodel(zvec_var)
+        zvar = compute_embedded(btsize, zindim, trgs[:, :-1], cond)
+        fake = gmdl(zvar)
 
         # Update the generator error
-        glss = F.binary_cross_entropy(dmodel(fake), real_label)
+        glss = F.binary_cross_entropy(dmdl(fake), rlbl)
         gopt.zero_grad()
         glss.backward()
         gopt.step()
@@ -170,24 +208,25 @@ def train(dload, dmodel, gmodel, dopt, gopt, conf, zt, rslt_path):
         # Measure batch time
         tbatch.update(time.time() - end_time)
 
-        # Print info
-        print('Epoch: [{0}][{1}/{2}]\t'
-            'Time {tbatch.val:.3f} ({tbatch.avg:.3f})\t'
-            'Data {tdload.val:.3f} ({tdload.avg:.3f})\t'
-            'DLoss {avgdlss.val:.4f} ({avgdlss.avg:.4f})\t'
-            'GLoss {avgglss.val:.4f} ({avgglss.avg:.4f})\t'.format(
-                epoch, i, len(dload), tbatch=tbatch, tdload=tdload,
-                avgdlss=avgdlss, avgglss=avgglss
-            )
-        )
+        # Print images and info
+        if (i % 100) == 0:
 
-        # Print images
-        if i == 0:
-            nrows = int(math.sqrt(conf['btsize']))
-            vutils.save_image(imgs, rslt_path+'real.png',\
+            # Print info
+            print('Epoch: [{0}][{1}/{2}]\t'
+                'Time {tbatch.val:.3f} ({tbatch.avg:.3f})\t'
+                'Data {tdload.val:.3f} ({tdload.avg:.3f})\t'
+                'DLoss {avgdlss.val:.4f} ({avgdlss.avg:.4f})\t'
+                'GLoss {avgglss.val:.4f} ({avgglss.avg:.4f})\t'.format(
+                    epoch, i, len(dload), tbatch=tbatch, tdload=tdload,
+                    avgdlss=avgdlss, avgglss=avgglss
+                )
+            )
+
+            # Image
+            vutils.save_image(imgs, path+'real.png',\
             normalize=True, nrow=16)
-            out = gmodel(zt)
-            vutils.save_image(out.data, rslt_path+'fake.png',\
+            out = gmdl(zt)
+            vutils.save_image(out.data, path+'fake.png',\
             normalize=True, nrow=16)
 
         # Reset time
@@ -216,6 +255,10 @@ if __name__ == '__main__':
     # Output path
     parser.add_argument('--out-path', metavar='OUT', help='output path')
 
+    # Conditional option
+    parser.add_argument('--is-cond', dest='is_cond', action='store_true',
+    help='use conditional info')
+
     # Parsing arguments
     args = parser.parse_args()
 
@@ -223,6 +266,9 @@ if __name__ == '__main__':
     data_path = args.data_path
     conf_path = args.conf_file
     rslt_path = args.out_path
+
+    # Setting if data is conditional
+    is_cond = args.is_cond
 
     # Open config file
     conf = None
@@ -248,35 +294,36 @@ if __name__ == '__main__':
 
     # Setting models
     imsz, dlyrs, glyrs = tuple(conf['imsize']), conf['dlayer'], conf['glayer']
-    dmodel = models.__dict__[conf['dmodel']](dlyrs, imsz)
-    gmodel = models.__dict__[conf['gmodel']](glyrs, imsz)
+    dmdl = models.__dict__[conf['dmodel']](dlyrs, imsz)
+    gmdl = models.__dict__[conf['gmodel']](glyrs, imsz)
 
     # Setting to parallel
-    dmodel = torch.nn.DataParallel(dmodel).cuda()
-    gmodel = torch.nn.DataParallel(gmodel).cuda()
+    dmdl = torch.nn.DataParallel(dmdl).cuda()
+    gmdl = torch.nn.DataParallel(gmdl).cuda()
     cudnn.benchmark = True # Inbuilt cudnn auto-tuner (fastest)
 
     # Loading models
     if os.path.isfile(cur_mdl_pth):
         check = torch.load(cur_mdl_pth)
-        dmodel.load_state_dict(check['dmodel'])
-        gmodel.load_state_dict(check['gmodel'])
+        dmdl.load_state_dict(check['dmdl'])
+        gmdl.load_state_dict(check['gmdl'])
         conf = check['conf']
 
     # Setting optimizers
     lr, mm = conf['learnr'], conf['momntm']
-    dopt = optim.Adam(dmodel.parameters(), lr=lr)
-    gopt = optim.Adam(gmodel.parameters(), lr=lr)
+    dopt = optim.Adam(dmdl.parameters(), lr=lr)
+    gopt = optim.Adam(gmdl.parameters(), lr=lr)
 
     # Auxiliary random fixed noise
-    zt = torch.randn(btsize, glyrs[0])
-    zt = torch.autograd.Variable(zt.cuda())
+    onehot = ToOneHot(range(11))
+    zt = onehot(np.arange(btsize) % 10)
+    zt = compute_embedded(btsize, conf['zindim'], zt, is_cond)
 
     # Training loop
     for epoch in range(conf['cepoch'], conf['nepoch']):
 
         # Train model
-        dmloss, gmloss = train(dload,dmodel,gmodel,dopt,gopt,conf,zt,rslt_path)
+        dmloss, gmloss = train(dload,dmdl,gmdl,dopt,gopt,zt,rslt_path, is_cond)
 
         # Update losses
         conf['dmloss'].append(dmloss)
@@ -285,7 +332,7 @@ if __name__ == '__main__':
         conf['cepoch'] = epoch+1
 
         # Set checkpoint
-        check = {'dmodel': dmodel.state_dict(), 'gmodel': gmodel.state_dict()}
+        check = {'dmdl': dmdl.state_dict(), 'gmdl': gmdl.state_dict()}
         check['conf'] = conf
 
         # Save model
